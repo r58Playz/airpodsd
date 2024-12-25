@@ -49,7 +49,7 @@ impl Decode for BatteryStatus {
 		Ok(match (data.get_u8(), data.get_u8()) {
 			(_, 0x00) => BatteryStatus::Unknown,
 			(x, 0x01) => BatteryStatus::Charging(x),
-			(x, 0x02) => BatteryStatus::Discharging(x),
+			(x, 0x02) | (x, 0x03) => BatteryStatus::Discharging(x),
 			(_, 0x04) => BatteryStatus::Disconnected,
 			x => bail!("invalid battery status: {:x?}", x),
 		})

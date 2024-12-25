@@ -3,13 +3,12 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use event_listener::Event;
 use log::info;
-use tokio::sync::Mutex;
 use zbus::{
 	Connection, conn::Builder as ConnBuilder, fdo::ObjectManager, interface, proxy,
 	zvariant::OwnedObjectPath,
 };
 
-use super::{PodsBattery, PodsStatus, blconn::Address};
+use super::{PodsBattery, PodsState, blconn::Address};
 
 #[proxy]
 trait BatteryProviderManager {
@@ -49,16 +48,18 @@ async fn create_conn(at: &str) -> Result<Connection> {
 		.context("failed to build")
 }
 
-fn calculate_percentage(data: PodsBattery) -> Option<u8> {
-	data.left
-		.as_percent()
-		.zip(data.right.as_percent())
-		.map(|(l, r)| (l + r) / 2)
+fn calculate_percentage(data: Option<PodsBattery>) -> Option<u8> {
+	data.and_then(|x| {
+		x.left
+			.as_percent()
+			.zip(x.right.as_percent())
+			.map(|(l, r)| (l + r) / 2)
+	})
 }
 
 pub async fn bluez_main(
 	addr: Address,
-	status: Arc<Mutex<PodsStatus>>,
+	status: PodsState,
 	notify: Arc<Event>,
 	name: String,
 ) -> Result<()> {

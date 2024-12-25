@@ -33,27 +33,22 @@ pub struct PodsInEar {
 
 #[derive(Serialize, Deserialize, Copy, Clone, Eq, PartialEq)]
 pub struct PodsStatus {
-	pub battery: PodsBattery,
-	pub noise: NoiseControlStatus,
-	pub ear: PodsInEar,
+	pub battery: Option<PodsBattery>,
+	pub noise: Option<NoiseControlStatus>,
+	pub ear: Option<PodsInEar>,
 }
 
 impl PodsStatus {
 	pub fn unknown() -> Self {
 		Self {
-			battery: PodsBattery {
-				case: BatteryStatus::Unknown,
-				left: BatteryStatus::Unknown,
-				right: BatteryStatus::Unknown,
-			},
-			noise: NoiseControlStatus::Off,
-			ear: PodsInEar {
-				primary: EarDetectionStatus::InEar,
-				secondary: EarDetectionStatus::InEar,
-			},
+			battery: None,
+			noise: None,
+			ear: None,
 		}
 	}
 }
+
+pub type PodsState = Arc<Mutex<PodsStatus>>;
 
 pub async fn daemon_main(addr: Address) -> Result<()> {
 	env_logger::builder()

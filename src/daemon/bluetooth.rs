@@ -7,20 +7,22 @@ use std::{io::ErrorKind, sync::Arc, time::Duration};
 use tokio::{
 	io::{AsyncReadExt, AsyncWriteExt},
 	net::UnixStream,
-	sync::Mutex,
 };
 
-use crate::daemon::blconn::{self, L2CapAddr};
+use crate::daemon::{
+	blconn::{self, L2CapAddr},
+	packet::BatteryStatus,
+};
 
 use super::{
-	PodsStatus,
+	PodsBattery, PodsInEar, PodsState, PodsStatus,
 	blconn::Address,
-	packet::{BatteryComponent, ParsedPacket},
+	packet::{BatteryComponent, EarDetectionStatus, ParsedPacket},
 };
 
 async fn handle_stream(
 	mut stream: UnixStream,
-	status: Arc<Mutex<PodsStatus>>,
+	status: PodsState,
 	notify: Arc<Event>,
 ) -> Result<()> {
 	// handshake
@@ -63,20 +65,29 @@ async fn handle_stream(
 					let mut lock = status.lock().await;
 					match packet {
 						ParsedPacket::Battery(batteries) => {
+							let locked = lock.battery.get_or_insert(PodsBattery {
+								case: BatteryStatus::Unknown,
+								left: BatteryStatus::Unknown,
+								right: BatteryStatus::Unknown,
+							});
 							for battery in batteries {
 								match battery.component {
-									BatteryComponent::Case => lock.battery.case = battery.status,
-									BatteryComponent::Left => lock.battery.left = battery.status,
-									BatteryComponent::Right => lock.battery.right = battery.status,
+									BatteryComponent::Case => locked.case = battery.status,
+									BatteryComponent::Left => locked.left = battery.status,
+									BatteryComponent::Right => locked.right = battery.status,
 								}
 							}
 						}
 						ParsedPacket::NoiseControl(status) => {
-							lock.noise = status;
+							lock.noise = Some(status);
 						}
 						ParsedPacket::EarDetection { primary, secondary } => {
-							lock.ear.primary = primary;
-							lock.ear.secondary = secondary;
+							let locked = lock.ear.get_or_insert(PodsInEar {
+								primary: EarDetectionStatus::InCase,
+								secondary: EarDetectionStatus::InCase,
+							});
+							locked.primary = primary;
+							locked.secondary = secondary;
 						}
 					}
 					if last_stats.is_some_and(|x| x == *lock) {
@@ -118,7 +129,7 @@ pub async fn bluetooth_setup(addr: Address) -> Result<(Device, String)> {
 
 pub async fn bluetooth_main(
 	addr: Address,
-	status: Arc<Mutex<PodsStatus>>,
+	status: PodsState,
 	notify: Arc<Event>,
 	device: Device,
 ) -> Result<()> {
@@ -143,7 +154,11 @@ pub async fn bluetooth_main(
 		}
 
 		if !was_waiting {
-			*status.lock().await = PodsStatus::unknown();
+			let mut locked = status.lock().await;
+			locked.ear.take();
+			locked.battery.take();
+			locked.noise.take();
+
 			notify.notify(usize::MAX);
 			was_waiting = true;
 		}

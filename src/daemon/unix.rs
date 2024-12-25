@@ -10,7 +10,7 @@ use tokio::{
 	sync::Mutex,
 };
 
-use super::{Address, PodsStatus};
+use super::{Address, PodsState, PodsStatus};
 
 enum ListenerEvent {
 	ReadLine(String),
@@ -32,7 +32,7 @@ async fn write_status(tx: &mut OwnedWriteHalf, status: &Mutex<PodsStatus>) -> Re
 
 async fn handle_listener(
 	conn: UnixStream,
-	status: Arc<Mutex<PodsStatus>>,
+	status: PodsState,
 	notify: Arc<Event>,
 ) -> Result<()> {
 	let (rx, mut tx) = conn.into_split();
@@ -64,7 +64,7 @@ async fn handle_listener(
 
 pub async fn unix_listener_main(
 	addr: Address,
-	status: Arc<Mutex<PodsStatus>>,
+	status: PodsState,
 	notify: Arc<Event>,
 ) -> Result<()> {
 	let sock = UnixListener::bind(format!("\0dev.r58playz.airpodsd.{addr}"))

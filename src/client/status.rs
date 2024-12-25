@@ -7,15 +7,30 @@ use super::connect;
 
 fn print_status(addr: Address, status: PodsStatus) {
 	println!("Status for device {addr}:");
-	println!(
-		"\tBattery: Case {:?} Left {:?} Right {:?}",
-		status.battery.case, status.battery.left, status.battery.right
-	);
-	println!("\tNoise control: {:?}", status.noise);
-	println!(
-		"\tEar detection: Primary {:?} Secondary {:?}",
-		status.ear.primary, status.ear.secondary
-	);
+
+	if let Some(battery) = status.battery {
+		println!(
+			"\tBattery: Case {:?} Left {:?} Right {:?}",
+			battery.case, battery.left, battery.right
+		);
+	} else {
+		println!("\tBattery: unknown");
+	}
+
+	if let Some(noise) = status.noise {
+		println!("\tNoise control: {:?}", noise);
+	} else {
+		println!("\tNoise control: unknown");
+	}
+
+	if let Some(ear) = status.ear {
+		println!(
+			"\tEar detection: Primary {:?} Secondary {:?}",
+			ear.primary, ear.secondary
+		);
+	} else {
+		println!("\tEar detection: unknown");
+	}
 }
 
 pub async fn get(addr: Address) -> Result<()> {
