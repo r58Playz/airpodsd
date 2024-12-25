@@ -39,10 +39,10 @@ impl Battery {
 	}
 }
 
-async fn create_conn() -> Result<Connection> {
+async fn create_conn(at: &str) -> Result<Connection> {
 	ConnBuilder::system()
 		.context("failed to create builder")?
-		.serve_at("/dev/r58playz/airpodsd", ObjectManager)
+		.serve_at(at, ObjectManager)
 		.context("failed to serve objmanager")?
 		.build()
 		.await
@@ -63,11 +63,12 @@ pub async fn bluez_main(
 	name: String,
 ) -> Result<()> {
 	let dev = addr.to_string().replace(":", "_");
-	let iface_name = OwnedObjectPath::try_from(format!("/dev/r58playz/airpodsd/dev_{dev}"))
+	let prefix = format!("/dev/r58playz/airpodsd_{dev}");
+	let iface_name = OwnedObjectPath::try_from(format!("{prefix}/dev_{dev}"))
 		.context("interface object path is invalid")?;
 	let bluez_name = OwnedObjectPath::try_from(format!("/org/bluez/{name}/dev_{dev}"))
 		.context("bluez object path is invalid")?;
-	let conn = create_conn()
+	let conn = create_conn(&prefix)
 		.await
 		.context("failed to connect to d-bus system bus")?;
 
@@ -86,25 +87,17 @@ pub async fn bluez_main(
 
 	proxy
 		.register_battery_provider(
-			OwnedObjectPath::try_from("/dev/r58playz/airpodsd")
-				.context("failed to create battery provider path")?,
+			OwnedObjectPath::try_from(prefix).context("failed to create battery provider path")?,
 		)
 		.await
 		.context("failed to register battery provider")?;
 
 	info!("registered bluez battery provider");
 
-	let mut last_stats: Option<PodsBattery> = None;
-
 	loop {
 		notify.listen().await;
 
 		let locked = status.lock().await;
-		if last_stats.is_some_and(|x| x == locked.battery) {
-			continue;
-		} else {
-			last_stats.replace(locked.battery);
-		}
 
 		let percent = calculate_percentage(locked.battery);
 		let iface = conn
@@ -116,7 +109,12 @@ pub async fn bluez_main(
 		match (iface, percent) {
 			(Some(iface), Some(percent)) => {
 				info!("updating bluez battery percentage to {:?}%", percent);
-				iface.get_mut().await.percentage = percent;
+				let mut iface_ref = iface.get_mut().await;
+				iface_ref.percentage = percent;
+				iface_ref
+					.percentage_changed(iface.signal_emitter())
+					.await
+					.context("failed to fire percentage changed signal")?;
 			}
 			(Some(iface), None) => {
 				info!("removing bluez battery, battery percentage is unavailable");

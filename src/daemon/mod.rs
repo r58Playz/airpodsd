@@ -4,35 +4,38 @@ use anyhow::{Context, Result};
 use bluez::bluez_main;
 use event_listener::Event;
 use log::{LevelFilter, info};
+use serde::{Deserialize, Serialize};
 use tokio::{sync::Mutex, task::JoinSet};
 
 mod blconn;
 mod bluetooth;
 mod bluez;
-mod packet;
+mod unix;
+pub mod packet;
 
-use blconn::Address;
+pub use blconn::Address;
 use bluetooth::{bluetooth_main, bluetooth_setup};
 use packet::{BatteryStatus, EarDetectionStatus, NoiseControlStatus};
+use unix::unix_listener_main;
 
-#[derive(Copy, Clone, Eq, PartialEq)]
-struct PodsBattery {
-	case: BatteryStatus,
-	left: BatteryStatus,
-	right: BatteryStatus,
+#[derive(Serialize, Deserialize, Copy, Clone, Eq, PartialEq)]
+pub struct PodsBattery {
+	pub case: BatteryStatus,
+	pub left: BatteryStatus,
+	pub right: BatteryStatus,
 }
 
-#[derive(Copy, Clone, Eq, PartialEq)]
-struct PodsInEar {
-	primary: EarDetectionStatus,
-	secondary: EarDetectionStatus,
+#[derive(Serialize, Deserialize, Copy, Clone, Eq, PartialEq)]
+pub struct PodsInEar {
+	pub primary: EarDetectionStatus,
+	pub secondary: EarDetectionStatus,
 }
 
-#[derive(Copy, Clone, Eq, PartialEq)]
-struct PodsStatus {
-	battery: PodsBattery,
-	noise: NoiseControlStatus,
-	ear: PodsInEar,
+#[derive(Serialize, Deserialize, Copy, Clone, Eq, PartialEq)]
+pub struct PodsStatus {
+	pub battery: PodsBattery,
+	pub noise: NoiseControlStatus,
+	pub ear: PodsInEar,
 }
 
 pub async fn daemon_main(addr: Address) -> Result<()> {
@@ -62,6 +65,7 @@ pub async fn daemon_main(addr: Address) -> Result<()> {
 
 	set.spawn(bluetooth_main(addr, status.clone(), notify.clone(), device));
 	set.spawn(bluez_main(addr, status.clone(), notify.clone(), name));
+	set.spawn(unix_listener_main(addr, status, notify));
 
 	info!("daemon started");
 

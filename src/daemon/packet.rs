@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail};
 use bytes::{Buf, Bytes};
 use log::warn;
+use serde::{Deserialize, Serialize};
 
 trait Decode {
 	fn decode(data: &mut Bytes) -> Result<Self>
@@ -26,7 +27,7 @@ impl Decode for BatteryComponent {
 	}
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BatteryStatus {
 	Unknown,
 	Disconnected,
@@ -83,7 +84,7 @@ impl Decode for Battery {
 	}
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NoiseControlStatus {
 	Off,
 	NoiseCancellation,
@@ -107,7 +108,7 @@ impl Decode for NoiseControlStatus {
 	}
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EarDetectionStatus {
 	InEar,
 	OutOfEar,

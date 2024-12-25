@@ -46,6 +46,7 @@ async fn handle_stream(
 		.await
 		.context("failed to send enable notifications")?;
 
+	let mut last_stats: Option<PodsStatus> = None;
 	let mut buf = vec![0; 1024];
 	loop {
 		match stream.read(&mut buf).await {
@@ -78,7 +79,11 @@ async fn handle_stream(
 							lock.ear.secondary = secondary;
 						}
 					}
-					drop(lock);
+					if last_stats.is_some_and(|x| x == *lock) {
+						continue;
+					} else {
+						last_stats.replace(*lock);
+					}
 					notify.notify(usize::MAX);
 				}
 			}
