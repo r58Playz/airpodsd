@@ -11,6 +11,7 @@ use libbluetooth::{
 	l2cap::sockaddr_l2,
 };
 use libc::sockaddr;
+use tokio::task::spawn_blocking;
 
 const L2CAP_SOCKADDR_LEN: usize = size_of::<sockaddr_l2>();
 
@@ -73,7 +74,7 @@ fn checkerr(err: i32) -> Result<i32> {
 	}
 }
 
-unsafe fn connect_inner(addr: sockaddr_l2) -> Result<OwnedFd> {
+unsafe fn connect_inner_unsafe(addr: sockaddr_l2) -> Result<OwnedFd> {
 	let fd = unsafe {
 		checkerr(libc::socket(
 			libc::AF_BLUETOOTH,
@@ -93,9 +94,15 @@ unsafe fn connect_inner(addr: sockaddr_l2) -> Result<OwnedFd> {
 	Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
-pub fn connect(addr: L2CapAddr) -> Result<tokio::net::UnixStream> {
-	let fd = unsafe { connect_inner(addr.0)? };
+fn connect_inner(addr: L2CapAddr) -> Result<tokio::net::UnixStream> {
+	let fd = unsafe { connect_inner_unsafe(addr.0)? };
 	let std = std::os::unix::net::UnixStream::from(fd);
 	std.set_nonblocking(true)?;
 	tokio::net::UnixStream::from_std(std)
+}
+
+pub async fn connect(addr: L2CapAddr) -> Result<tokio::net::UnixStream> {
+	spawn_blocking(move || {
+		connect_inner(addr)
+	}).await?
 }

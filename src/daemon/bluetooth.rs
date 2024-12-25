@@ -99,7 +99,7 @@ async fn handle_stream(
 				}
 			}
 			Err(err) => {
-				if err.kind() == ErrorKind::ConnectionReset {
+				if matches!(err.kind(), ErrorKind::ConnectionReset | ErrorKind::TimedOut) {
 					// device probably went to sleep
 					break Ok(());
 				} else {
@@ -145,6 +145,7 @@ pub async fn bluetooth_main(
 			was_waiting = false;
 			info!("connecting to {}", addr);
 			let stream = blconn::connect(L2CapAddr::new(addr, 0x1001))
+				.await
 				.context("failed to connect to address")?;
 			info!("connected to device over l2cap");
 

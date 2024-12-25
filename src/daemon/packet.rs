@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 use bytes::{Buf, Bytes};
-use log::warn;
+use log::{info, warn};
 use serde::{Deserialize, Serialize};
 
 trait Decode {
@@ -47,9 +47,9 @@ impl BatteryStatus {
 impl Decode for BatteryStatus {
 	fn decode(data: &mut Bytes) -> Result<Self> {
 		Ok(match (data.get_u8(), data.get_u8()) {
-			(_, 0x00) => BatteryStatus::Unknown,
+			(_, 0x00) | (_, 0x03) => BatteryStatus::Unknown,
 			(x, 0x01) => BatteryStatus::Charging(x),
-			(x, 0x02) | (x, 0x03) => BatteryStatus::Discharging(x),
+			(x, 0x02) => BatteryStatus::Discharging(x),
 			(_, 0x04) => BatteryStatus::Disconnected,
 			x => bail!("invalid battery status: {:x?}", x),
 		})
@@ -167,6 +167,8 @@ impl ParsedPacket {
 					vec.push(Battery::decode(&mut data).context("failed to parse battery")?);
 				}
 
+				info!("received battery status: {:?}", vec);
+
 				Ok(Some(Self::Battery(vec)))
 			}
 			[0x09, 0x00] => {
@@ -179,6 +181,7 @@ impl ParsedPacket {
 					0x0D => {
 						let decoded = NoiseControlStatus::decode(&mut data)
 							.context("failed to parse noise control status")?;
+						info!("received noise control status: {:?}", decoded);
 						Ok(Some(Self::NoiseControl(decoded)))
 					}
 					x => {
@@ -198,6 +201,7 @@ impl ParsedPacket {
 				let secondary = EarDetectionStatus::decode(&mut data)
 					.context("failed to parse secondary ear detection status")?;
 
+				info!("received ear detection status: primary {:?} secondary {:?}", primary, secondary);
 				Ok(Some(Self::EarDetection { primary, secondary }))
 			}
 			x => {
