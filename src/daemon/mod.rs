@@ -10,8 +10,8 @@ use tokio::{sync::Mutex, task::JoinSet};
 mod blconn;
 mod bluetooth;
 mod bluez;
-mod unix;
 pub mod packet;
+mod unix;
 
 pub use blconn::Address;
 use bluetooth::{bluetooth_main, bluetooth_setup};
@@ -38,24 +38,30 @@ pub struct PodsStatus {
 	pub ear: PodsInEar,
 }
 
+impl PodsStatus {
+	pub fn unknown() -> Self {
+		Self {
+			battery: PodsBattery {
+				case: BatteryStatus::Unknown,
+				left: BatteryStatus::Unknown,
+				right: BatteryStatus::Unknown,
+			},
+			noise: NoiseControlStatus::Off,
+			ear: PodsInEar {
+				primary: EarDetectionStatus::InEar,
+				secondary: EarDetectionStatus::InEar,
+			},
+		}
+	}
+}
+
 pub async fn daemon_main(addr: Address) -> Result<()> {
 	env_logger::builder()
 		.filter_level(LevelFilter::Debug)
 		.parse_default_env()
 		.init();
 
-	let status = Arc::new(Mutex::new(PodsStatus {
-		battery: PodsBattery {
-			case: BatteryStatus::Unknown,
-			left: BatteryStatus::Unknown,
-			right: BatteryStatus::Unknown,
-		},
-		noise: NoiseControlStatus::Off,
-		ear: PodsInEar {
-			primary: EarDetectionStatus::InEar,
-			secondary: EarDetectionStatus::InEar,
-		},
-	}));
+	let status = Arc::new(Mutex::new(PodsStatus::unknown()));
 	let notify = Arc::new(Event::new());
 	let mut set = JoinSet::new();
 

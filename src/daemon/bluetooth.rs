@@ -122,6 +122,7 @@ pub async fn bluetooth_main(
 	notify: Arc<Event>,
 	device: Device,
 ) -> Result<()> {
+	let mut was_waiting = true;
 	loop {
 		// so that we don't steal the device from bluetoothd making it impossible to connect for
 		// audio
@@ -130,6 +131,7 @@ pub async fn bluetooth_main(
 			.await
 			.context("failed to get connected status of device")?
 		{
+			was_waiting = false;
 			info!("connecting to {}", addr);
 			let stream = blconn::connect(L2CapAddr::new(addr, 0x1001))
 				.context("failed to connect to address")?;
@@ -140,7 +142,13 @@ pub async fn bluetooth_main(
 				.context("failed to handle device stream")?;
 		}
 
-		info!("waiting for device to reconnect");
-		tokio::time::sleep(Duration::from_secs(60)).await;
+		if !was_waiting {
+			*status.lock().await = PodsStatus::unknown();
+			notify.notify(usize::MAX);
+			was_waiting = true;
+		}
+
+		info!("waiting for device to connect");
+		tokio::time::sleep(Duration::from_secs(10)).await;
 	}
 }
