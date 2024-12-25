@@ -94,10 +94,16 @@ pub async fn bluez_main(
 
 	info!("registered bluez battery provider");
 
+	let mut last_battery_info = None;
 	loop {
 		notify.listen().await;
 
 		let locked = status.lock().await;
+		if last_battery_info.is_some_and(|x| x == locked.battery) {
+			continue;
+		} else {
+			last_battery_info.replace(locked.battery);
+		}
 
 		let percent = calculate_percentage(locked.battery);
 		let iface = conn
