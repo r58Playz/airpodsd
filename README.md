@@ -13,3 +13,8 @@ You can query the information that airpodsd has with `airpodsd status <mac_addre
 This will automatically connect to a running airpodsd instance for that MAC address.
 
 In the future, support for changing noise cancellation and in-ear status will be added.
+
+## Usage with systemd
+Copy `airpodsd@.service` to `~/.config/systemd/user/` or the systemd user service location on your system.
+
+Enable (and start) the service with `systemctl --user enable --now airpodsd@<YOUR_AIRPODS_MAC_ADDRESS>`.
