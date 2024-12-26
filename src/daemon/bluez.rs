@@ -49,11 +49,11 @@ async fn create_conn(at: &str) -> Result<Connection> {
 }
 
 fn calculate_percentage(data: Option<PodsBattery>) -> Option<u8> {
-	data.and_then(|x| {
-		x.left
-			.as_percent()
-			.zip(x.right.as_percent())
-			.map(|(l, r)| (l + r) / 2)
+	data.and_then(|x| match (x.left.as_percent(), x.right.as_percent()) {
+		(Some(l), Some(r)) => Some((l + r) / 2),
+		(Some(l), None) => Some(l),
+		(None, Some(r)) => Some(r),
+		(None, None) => None,
 	})
 }
 
