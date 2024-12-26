@@ -1,0 +1,10 @@
+[Unit]
+Description=AirPods daemon for MAC address '%i'
+After=bluetooth.target
+
+[Service]
+Type=simple
+ExecStart=%h/.cargo/bin/airpodsd daemon '%I'
+
+[Install]
+WantedBy=default.target
