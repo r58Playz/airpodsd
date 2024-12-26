@@ -12,7 +12,7 @@ Run `airpodsd daemon <mac_address>` in the background.
 You can query the information that airpodsd has with `airpodsd status <mac_address>`.
 This will automatically connect to a running airpodsd instance for that MAC address.
 
-In the future, support for changing noise cancellation and in-ear status will be added.
+In the future, support for changing noise cancellation status and customizing how the reported battery percentage is calculated will be added.
 
 ## Usage with systemd
 Copy `airpodsd@.service` to `~/.config/systemd/user/` or the systemd user service location on your system.
