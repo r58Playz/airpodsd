@@ -125,6 +125,7 @@ impl Decode for EarDetectionStatus {
 			0x00 => Self::InEar,
 			0x01 => Self::OutOfEar,
 			0x02 => Self::InCase,
+			0x03 => Self::OutOfEar, // TODO find the real value for this
 			x => bail!("invalid ear detection status: {:x?}", x),
 		})
 	}
