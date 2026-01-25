@@ -5,6 +5,8 @@ After=bluetooth.target
 [Service]
 Type=simple
 ExecStart=%h/.cargo/bin/airpodsd daemon "%h/.config/airpodsd_keystore"
+Restart=on-failure
+RestartSec=5s
 
 [Install]
 WantedBy=default.target

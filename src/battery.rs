@@ -146,11 +146,10 @@ impl BluezBatteryProvider {
 		let iface_name = OwnedObjectPath::try_from(format!("{AIRPODSD_SERVE_PATH}/dev_{dev}"))
 			.context("failed to parse airpodsd battery interface path")?;
 
-		self.conn
+		let _ = self.conn
 			.object_server()
 			.remove::<BluezBattery, _>(&iface_name)
-			.await
-			.context("failed to remove battery from manager")?;
+			.await;
 
 		Ok(())
 	}

@@ -32,7 +32,6 @@ use crate::{
 
 enum L2CapEvent {
 	DeviceAdded(Address),
-	DeviceRemoved(Address),
 	DeviceConnected(Device),
 	DeviceDisconnected(Device),
 	Ignore,
@@ -140,6 +139,7 @@ impl L2CapClient {
 					vec![L2CapEvent::DeviceAdded(x)]
 				}))
 			} else {
+				trace!("filtered out device {x} since it doesn't have the apple uuid");
 				Ok(None)
 			}
 		}))
@@ -157,13 +157,11 @@ impl L2CapClient {
 			.context("failed to get adapter event stream")?
 			.map(|x| match x {
 				AdapterEvent::DeviceAdded(x) => L2CapEvent::DeviceAdded(x),
-				AdapterEvent::DeviceRemoved(x) => L2CapEvent::DeviceRemoved(x),
 				_ => L2CapEvent::Ignore,
 			});
 		let mut stream = select(select(events, discovered), SelectAll::new());
 
 		let mut monitors = HashMap::new();
-		let mut addrs = HashSet::new();
 
 		while let Some(event) = stream.next().await {
 			match event {
@@ -175,17 +173,13 @@ impl L2CapClient {
 							.await
 							.context("failed to check if device is apple-ish")?
 						{
-							debug!(
+							trace!(
 								"filtered out device {addr} since it doesn't have the apple uuid"
 							);
 							return Ok(());
 						}
 
-						if addrs.contains(&addr) {
-							return Ok(());
-						}
-						addrs.insert(addr);
-						trace!("added device {addr}");
+						trace!("monitoring device {addr}");
 
 						let dev_stream = device
 							.events()
@@ -212,11 +206,6 @@ impl L2CapClient {
 
 					if let Err(err) = res {
 						warn!("unable to monitor device {addr}: {err:?}");
-					}
-				}
-				L2CapEvent::DeviceRemoved(addr) => {
-					if addrs.remove(&addr) {
-						trace!("removed device {addr}");
 					}
 				}
 				L2CapEvent::DeviceConnected(dev) => {
