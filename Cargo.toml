@@ -10,7 +10,7 @@ bluer = { version = "0.17.4", features = ["full"] }
 bytes = "1.11.0"
 cbc = "0.1.2"
 cipher = "0.4.4"
-clap = "4.5.54"
+clap = { version = "4.5.54", features = ["cargo", "derive"] }
 env_logger = "0.11.8"
 futures = { version = "0.3.31", default-features = false, features = ["std", "async-await"] }
 libbluetooth = "0.1.0"

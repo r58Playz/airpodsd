@@ -1,0 +1,10 @@
+[Unit]
+Description=AirPods metadata daemon that exposes battery levels over UPower
+After=bluetooth.target
+
+[Service]
+Type=simple
+ExecStart=%h/.cargo/bin/airpodsd daemon "%h/.config/airpodsd_keystore"
+
+[Install]
+WantedBy=default.target

@@ -85,6 +85,10 @@ impl KeyStore {
 		})
 	}
 
+	pub async fn has(&self, addr: &Address) -> bool {
+		self.keys.lock().await.contains_key(addr)
+	}
+
 	pub async fn find(
 		&self,
 		mut func: impl FnMut(&CloudKeys) -> bool,

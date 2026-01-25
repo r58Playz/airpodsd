@@ -78,7 +78,11 @@ pub struct Daemon {
 	device_drop_timeout: Duration,
 }
 impl Daemon {
-	pub async fn new(keystore_path: PathBuf) -> Result<Self> {
+	pub async fn new(
+		keystore_path: PathBuf,
+		device_battery_timeout: Duration,
+		device_drop_timeout: Duration,
+	) -> Result<Self> {
 		let session = Session::new()
 			.await
 			.context("failed to connect to bluetoothd")?;
@@ -102,8 +106,8 @@ impl Daemon {
 			adapter,
 			battery_manager,
 			keystore,
-			device_battery_timeout: Duration::from_secs(60),
-			device_drop_timeout: Duration::from_secs(120),
+			device_battery_timeout,
+			device_drop_timeout,
 		})
 	}
 
@@ -140,8 +144,10 @@ impl Daemon {
 	pub async fn monitor(mut self) -> Result<()> {
 		let (tx, mut rx) = mpsc::unbounded_channel();
 
-		let mut l2cap =
-			tokio::spawn(L2CapClient::new(self.adapter.clone(), tx.clone()).monitor()).fuse();
+		let mut l2cap = tokio::spawn(
+			L2CapClient::new(self.adapter.clone(), self.keystore.clone(), tx.clone()).monitor(),
+		)
+		.fuse();
 		let mut ble =
 			tokio::spawn(BleClient::new(self.adapter.clone(), self.keystore.clone(), tx).monitor())
 				.fuse();

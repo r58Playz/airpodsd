@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+	collections::{HashMap, HashSet},
+	sync::Arc,
+};
 
 use anyhow::{Context, Result};
 use bluer::{Adapter, AdapterEvent, Address, Device, DeviceEvent, DeviceProperty, Uuid};
@@ -24,6 +27,7 @@ use crate::{
 		},
 	},
 	daemon::DaemonEvent,
+	keystore::KeyStore,
 };
 
 enum L2CapEvent {
@@ -35,14 +39,21 @@ enum L2CapEvent {
 }
 
 pub struct L2CapClient {
-	adapter: Adapter,
 	set: JoinSet<Result<()>>,
+
+	adapter: Adapter,
+	keystore: Arc<KeyStore>,
 	events: mpsc::UnboundedSender<DaemonEvent>,
 }
 impl L2CapClient {
-	pub fn new(adapter: Adapter, events: mpsc::UnboundedSender<DaemonEvent>) -> Self {
+	pub fn new(
+		adapter: Adapter,
+		keystore: Arc<KeyStore>,
+		events: mpsc::UnboundedSender<DaemonEvent>,
+	) -> Self {
 		Self {
 			adapter,
+			keystore,
 			events,
 			set: JoinSet::new(),
 		}
@@ -65,6 +76,7 @@ impl L2CapClient {
 		addr: Address,
 		mut stream: UnixStream,
 		events: mpsc::UnboundedSender<DaemonEvent>,
+		has_keys: bool,
 	) -> Result<()> {
 		stream
 			.write_all(HANDSHAKE_PACKET)
@@ -79,10 +91,12 @@ impl L2CapClient {
 			.await
 			.context("failed to write enable notifications")?;
 
-		stream
-			.write_all(GET_CLOUD_KEYS)
-			.await
-			.context("failed to write get cloud keys")?;
+		if !has_keys {
+			stream
+				.write_all(GET_CLOUD_KEYS)
+				.await
+				.context("failed to write get cloud keys")?;
+		}
 
 		let mut buf = vec![0; 1024];
 		loop {
@@ -223,6 +237,7 @@ impl L2CapClient {
 							.send(DaemonEvent::BrEdrConnected(remote_addr, name.clone()))
 							.context("failed to send message to daemon")?;
 
+						let has_keys = self.keystore.has(&addr).await;
 						let events = self.events.clone();
 						monitors.insert(
 							addr,
@@ -238,9 +253,13 @@ impl L2CapClient {
 
 										info!("connected to {name:?} ({addr}, {remote_addr})");
 
-										let ret =
-											Self::monitor_one(remote_addr, stream, events.clone())
-												.await;
+										let ret = Self::monitor_one(
+											remote_addr,
+											stream,
+											events.clone(),
+											has_keys,
+										)
+										.await;
 
 										if let Err(err) = ret {
 											warn!("device monitoring for {} failed: {err:?}", addr);
