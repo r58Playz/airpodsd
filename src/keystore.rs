@@ -85,8 +85,16 @@ impl KeyStore {
 		})
 	}
 
-	pub async fn find(&self, mut func: impl FnMut(&CloudKeys) -> bool) -> Option<(Address, CloudKeys)> {
-		self.keys.lock().await.iter().find(|x| func(x.1)).map(|(a, b)| (*a, b.clone()))
+	pub async fn find(
+		&self,
+		mut func: impl FnMut(&CloudKeys) -> bool,
+	) -> Option<(Address, CloudKeys)> {
+		self.keys
+			.lock()
+			.await
+			.iter()
+			.find(|x| func(x.1))
+			.map(|(a, b)| (*a, b.clone()))
 	}
 
 	pub async fn set(&self, addr: Address, keys: CloudKeys) -> Result<()> {
@@ -94,6 +102,8 @@ impl KeyStore {
 		locked.insert(addr, keys);
 		let serialized = Self::serialize(&mut locked).context("")?;
 
-		tokio::fs::write(&self.path, serialized).await.context("failed to write keystore to disk")
+		tokio::fs::write(&self.path, serialized)
+			.await
+			.context("failed to write keystore to disk")
 	}
 }

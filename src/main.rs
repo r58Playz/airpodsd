@@ -7,8 +7,8 @@ use crate::daemon::Daemon;
 
 mod battery;
 mod bluetooth;
-mod keystore;
 mod daemon;
+mod keystore;
 
 #[tokio::main]
 async fn main() -> Result<()> {

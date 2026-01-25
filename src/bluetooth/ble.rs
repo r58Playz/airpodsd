@@ -6,7 +6,7 @@ use bluer::{
 	Adapter, AddressType,
 	monitor::{Monitor, MonitorEvent, Pattern, Type, data_type::MANUFACTURER_SPECIFIC_DATA},
 };
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 use cbc::Decryptor;
 use cipher::{BlockDecryptMut, BlockEncrypt, KeyInit, KeyIvInit, generic_array::GenericArray};
 use futures::StreamExt;
