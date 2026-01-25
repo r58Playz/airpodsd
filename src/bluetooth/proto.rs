@@ -221,7 +221,6 @@ impl L2CapPacket {
 			}
 			[0x1d, 0x00] => {
 				// Info
-				dbg!(&data);
 				let _unknown_1 = data.split_to(
 					data.iter()
 						.position(|x| *x == b'\0')

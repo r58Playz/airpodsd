@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::{Context, Result};
 use bluer::{Adapter, AdapterEvent, Address, Device, DeviceEvent, DeviceProperty, Uuid};
@@ -28,6 +28,7 @@ use crate::{
 
 enum L2CapEvent {
 	DeviceAdded(Address),
+	DeviceRemoved(Address),
 	DeviceConnected(Device),
 	DeviceDisconnected(Device),
 	Ignore,
@@ -92,7 +93,7 @@ impl L2CapClient {
 				L2CapPacket::decode(bytes).context("failed to parse l2cap packet")?
 			{
 				events
-					.send(DaemonEvent::L2CapPacket(addr, packet))
+					.send(DaemonEvent::BrEdrPacket(addr, packet))
 					.context("failed to send message to daemon")?;
 			}
 		}
@@ -117,9 +118,12 @@ impl L2CapClient {
 					.context("failed to check if device is connected")?;
 
 				Ok(Some(if connected {
-					L2CapEvent::DeviceConnected(device)
+					vec![
+						L2CapEvent::DeviceConnected(device),
+						L2CapEvent::DeviceAdded(x),
+					]
 				} else {
-					L2CapEvent::DeviceAdded(x)
+					vec![L2CapEvent::DeviceAdded(x)]
 				}))
 			} else {
 				Ok(None)
@@ -130,7 +134,7 @@ impl L2CapClient {
 		.filter_map(|x| x.transpose())
 		.collect::<Result<Vec<_>>>()
 		.context("failed to probe currently discovered device")?;
-		let discovered = stream::iter(discovered_events);
+		let discovered = stream::iter(discovered_events.into_iter().flatten());
 
 		let events = self
 			.adapter
@@ -139,30 +143,35 @@ impl L2CapClient {
 			.context("failed to get adapter event stream")?
 			.map(|x| match x {
 				AdapterEvent::DeviceAdded(x) => L2CapEvent::DeviceAdded(x),
+				AdapterEvent::DeviceRemoved(x) => L2CapEvent::DeviceRemoved(x),
 				_ => L2CapEvent::Ignore,
 			});
 		let mut stream = select(select(events, discovered), SelectAll::new());
 
-		let mut clients = HashMap::new();
+		let mut monitors = HashMap::new();
+		let mut addrs = HashSet::new();
 
 		while let Some(event) = stream.next().await {
 			match event {
-				L2CapEvent::DeviceAdded(address) => {
+				L2CapEvent::DeviceAdded(addr) => {
 					let res = (async || {
-						let device = self
-							.adapter
-							.device(address)
-							.context("failed to get device")?;
+						let device = self.adapter.device(addr).context("failed to get device")?;
 
 						if !Self::is_device_apple(&device)
 							.await
 							.context("failed to check if device is apple-ish")?
 						{
 							debug!(
-								"filtered out device {address} since it doesn't have the apple uuid"
+								"filtered out device {addr} since it doesn't have the apple uuid"
 							);
 							return Ok(());
 						}
+
+						if addrs.contains(&addr) {
+							return Ok(());
+						}
+						addrs.insert(addr);
+						trace!("added device {addr}");
 
 						let dev_stream = device
 							.events()
@@ -188,12 +197,21 @@ impl L2CapClient {
 					.await;
 
 					if let Err(err) = res {
-						warn!("unable to monitor device {address}: {err:?}");
+						warn!("unable to monitor device {addr}: {err:?}");
+					}
+				}
+				L2CapEvent::DeviceRemoved(addr) => {
+					if addrs.remove(&addr) {
+						trace!("removed device {addr}");
 					}
 				}
 				L2CapEvent::DeviceConnected(dev) => {
 					let addr = dev.address();
 					let res = (async || {
+						if monitors.contains_key(&addr) {
+							return Ok(());
+						}
+
 						let remote_addr = dev
 							.remote_address()
 							.await
@@ -201,31 +219,40 @@ impl L2CapClient {
 
 						let name = dev.name().await.context("failed to get device name")?;
 
-						debug!("connecting to {name:?} ({addr}, {remote_addr})");
-
-						let stream = l2capconn::connect(L2CapAddr::new(remote_addr, 0x1001))
-							.await
-							.context("failed to connect via l2cap")?;
-
-						info!("connected to {name:?} ({addr}, {remote_addr})");
-
-						let events = self.events.clone();
-
-						events
-							.send(DaemonEvent::BrEdrName(remote_addr, name))
+						self.events
+							.send(DaemonEvent::BrEdrConnected(remote_addr, name.clone()))
 							.context("failed to send message to daemon")?;
 
-						clients.insert(
+						let events = self.events.clone();
+						monitors.insert(
 							addr,
-							self.set.spawn(async move {
-								let ret = Self::monitor_one(remote_addr, stream, events).await;
-								if let Err(err) = ret {
-									warn!("device monitoring for {} failed: {err:?}", addr);
-									Err(err)
-								} else {
-									Ok(())
-								}
-							}),
+							(
+								self.set.spawn(async move {
+									loop {
+										debug!("connecting to {name:?} ({addr}, {remote_addr})");
+
+										let stream =
+											l2capconn::connect(L2CapAddr::new(remote_addr, 0x1001))
+												.await
+												.context("failed to connect via l2cap")?;
+
+										info!("connected to {name:?} ({addr}, {remote_addr})");
+
+										let ret =
+											Self::monitor_one(remote_addr, stream, events.clone())
+												.await;
+
+										if let Err(err) = ret {
+											warn!("device monitoring for {} failed: {err:?}", addr);
+
+											if !dev.is_connected().await.is_ok_and(|x| x) {
+												break Err(err);
+											}
+										}
+									}
+								}),
+								remote_addr,
+							),
 						);
 
 						anyhow::Ok(())
@@ -237,8 +264,11 @@ impl L2CapClient {
 					}
 				}
 				L2CapEvent::DeviceDisconnected(dev) => {
-					if let Some(device) = clients.remove(&dev.address()) {
-						device.abort();
+					if let Some((monitor, remote_addr)) = monitors.remove(&dev.address()) {
+						monitor.abort();
+						self.events
+							.send(DaemonEvent::BrEdrDisconnected(remote_addr))
+							.context("failed to send message to daemon")?;
 					}
 				}
 				L2CapEvent::Ignore => {}

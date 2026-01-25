@@ -5,7 +5,7 @@ use zbus::{
 	zvariant::OwnedObjectPath,
 };
 
-use crate::bluetooth::proto::BatteryStatus;
+use crate::{bluetooth::proto::BatteryStatus, daemon::DeviceBattery};
 
 const AIRPODSD_SERVE_PATH: &str = "/dev/r58playz/airpodsd";
 
@@ -74,12 +74,8 @@ impl BluezBatteryProvider {
 		Ok(Self { conn, adapter_name })
 	}
 
-	fn calculate_percentage(
-		_case: BatteryStatus,
-		left: BatteryStatus,
-		right: BatteryStatus,
-	) -> Option<u8> {
-		match (left.as_percent(), right.as_percent()) {
+	fn calculate_percentage(battery: &DeviceBattery) -> Option<u8> {
+		match (battery.left.as_percent(), battery.right.as_percent()) {
 			(Some(l), Some(r)) => Some((l + r) / 2),
 			(Some(l), None) => Some(l),
 			(None, Some(r)) => Some(r),
@@ -90,9 +86,7 @@ impl BluezBatteryProvider {
 	pub async fn update_battery(
 		&mut self,
 		address: Address,
-		case: BatteryStatus,
-		left: BatteryStatus,
-		right: BatteryStatus,
+		battery: &DeviceBattery,
 	) -> Result<()> {
 		let dev = address.to_string().replace(":", "_");
 		let iface_name = OwnedObjectPath::try_from(format!("{AIRPODSD_SERVE_PATH}/dev_{dev}"))
@@ -100,7 +94,7 @@ impl BluezBatteryProvider {
 		let bluez_name =
 			OwnedObjectPath::try_from(format!("/org/bluez/{}/dev_{dev}", self.adapter_name))
 				.context("failed to parse bluez battery interface path")?;
-		let percent = Self::calculate_percentage(case, left, right);
+		let percent = Self::calculate_percentage(battery);
 
 		let iface = self
 			.conn
@@ -143,6 +137,20 @@ impl BluezBatteryProvider {
 				// nothing to do
 			}
 		}
+
+		Ok(())
+	}
+
+	pub async fn drop_battery(&mut self, address: Address) -> Result<()> {
+		let dev = address.to_string().replace(":", "_");
+		let iface_name = OwnedObjectPath::try_from(format!("{AIRPODSD_SERVE_PATH}/dev_{dev}"))
+			.context("failed to parse airpodsd battery interface path")?;
+
+		self.conn
+			.object_server()
+			.remove::<BluezBattery, _>(&iface_name)
+			.await
+			.context("failed to remove battery from manager")?;
 
 		Ok(())
 	}
