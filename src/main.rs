@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use anyhow::{Context, Result};
 use log::LevelFilter;
 
@@ -5,6 +7,7 @@ use crate::daemon::Daemon;
 
 mod battery;
 mod bluetooth;
+mod keystore;
 mod daemon;
 
 #[tokio::main]
@@ -15,7 +18,7 @@ async fn main() -> Result<()> {
 		.parse_default_env()
 		.init();
 
-	let daemon = Daemon::new()
+	let daemon = Daemon::new(PathBuf::from("/home/r58playz/keystore"))
 		.await
 		.context("failed to create daemon instance")?;
 

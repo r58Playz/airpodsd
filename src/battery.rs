@@ -5,7 +5,7 @@ use zbus::{
 	zvariant::OwnedObjectPath,
 };
 
-use crate::{bluetooth::proto::BatteryStatus, daemon::DeviceBattery};
+use crate::daemon::DeviceBattery;
 
 const AIRPODSD_SERVE_PATH: &str = "/dev/r58playz/airpodsd";
 

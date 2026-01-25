@@ -1,6 +1,8 @@
 use std::{
 	collections::HashMap,
+	path::PathBuf,
 	pin::Pin,
+	sync::Arc,
 	time::{Duration, Instant},
 };
 
@@ -13,16 +15,18 @@ use tokio::sync::mpsc;
 use crate::{
 	battery::BluezBatteryProvider,
 	bluetooth::{
+		ble::BleClient,
 		l2cap::L2CapClient,
-		proto::{BatteryComponent, BatteryStatus, L2CapPacket, ProximityPairingPacket},
+		proto::{Battery, BatteryComponent, BatteryStatus, L2CapPacket, ProximityPairingPacket},
 	},
+	keystore::KeyStore,
 };
 
 pub enum DaemonEvent {
 	BrEdrConnected(Address, Option<String>),
 	BrEdrPacket(Address, L2CapPacket),
 	BrEdrDisconnected(Address),
-	BleAdvertisement(ProximityPairingPacket),
+	BleAdvertisement(Address, ProximityPairingPacket),
 }
 
 #[derive(Clone, Debug)]
@@ -68,12 +72,13 @@ type TimeoutFuture = Pin<Box<dyn Future<Output = (DeviceTimeoutType, Address)>>>
 pub struct Daemon {
 	adapter: Adapter,
 	battery_manager: BluezBatteryProvider,
+	keystore: Arc<KeyStore>,
 
 	device_battery_timeout: Duration,
 	device_drop_timeout: Duration,
 }
 impl Daemon {
-	pub async fn new() -> Result<Self> {
+	pub async fn new(keystore_path: PathBuf) -> Result<Self> {
 		let session = Session::new()
 			.await
 			.context("failed to connect to bluetoothd")?;
@@ -87,9 +92,16 @@ impl Daemon {
 			.await
 			.context("failed to register bluez battery provider")?;
 
+		let keystore = Arc::new(
+			KeyStore::new(keystore_path)
+				.await
+				.context("failed to initialize keystore")?,
+		);
+
 		Ok(Self {
 			adapter,
 			battery_manager,
+			keystore,
 			device_battery_timeout: Duration::from_secs(60),
 			device_drop_timeout: Duration::from_secs(120),
 		})
@@ -115,11 +127,24 @@ impl Daemon {
 		]
 	}
 
+	fn update_device_battery(state: &mut DeviceState, batteries: Vec<Battery>) {
+		for battery in batteries {
+			match battery.component {
+				BatteryComponent::Case => state.battery.case = battery.status,
+				BatteryComponent::Left => state.battery.left = battery.status,
+				BatteryComponent::Right => state.battery.right = battery.status,
+			}
+		}
+	}
+
 	pub async fn monitor(mut self) -> Result<()> {
 		let (tx, mut rx) = mpsc::unbounded_channel();
 
 		let mut l2cap =
 			tokio::spawn(L2CapClient::new(self.adapter.clone(), tx.clone()).monitor()).fuse();
+		let mut ble =
+			tokio::spawn(BleClient::new(self.adapter.clone(), self.keystore.clone(), tx).monitor())
+				.fuse();
 
 		let mut timeouts = FuturesUnordered::from_iter(std::iter::once(Box::pin(
 			futures::future::pending(),
@@ -132,6 +157,7 @@ impl Daemon {
 		loop {
 			tokio::select! {
 				x = &mut l2cap => x.context("failed to join l2cap").flatten()?,
+				x = &mut ble => x.context("failed to join ble").flatten()?,
 				addr = timeouts.next() => {
 					// addr will never be None since we put a infinite pending in the timeout list
 					let (ty, addr) = addr.unwrap();
@@ -165,21 +191,14 @@ impl Daemon {
 							if let Some(state) = devices.get_mut(&addr) {
 								match packet {
 									L2CapPacket::Battery(batteries) => {
-										for battery in batteries {
-											match battery.component {
-												BatteryComponent::Case => state.battery.case = battery.status,
-												BatteryComponent::Left => state.battery.left = battery.status,
-												BatteryComponent::Right => state.battery.right = battery.status,
-											}
-										}
-
+										Self::update_device_battery(state, batteries);
 										self.battery_manager.update_battery(addr, &state.battery).await.context("failed to update battery level")?;
 									}
 									L2CapPacket::Info { name, .. } => {
 										state.name = Some(name);
 									}
-									L2CapPacket::CloudKeys { irk, enc_key } => {
-										trace!("got keys for {addr}: {irk:?} {enc_key:?}");
+									L2CapPacket::CloudKeys(keys) => {
+										self.keystore.set(addr, keys).await.context("failed to add to keystore")?;
 									}
 									_ => {}
 								}
@@ -195,7 +214,16 @@ impl Daemon {
 								timeouts.extend(self.device_timeouts(addr));
 							}
 						}
-						Some(DaemonEvent::BleAdvertisement(ad)) => {}
+						Some(DaemonEvent::BleAdvertisement(addr, advertisement)) => {
+							let state = devices.entry(addr).or_insert_with(Default::default);
+							state.last_ble_advertise = Some(Instant::now());
+							Self::update_device_battery(state, advertisement.to_battery_state());
+							self.battery_manager.update_battery(addr, &state.battery).await.context("failed to update battery level")?;
+
+							debug!("device {addr} advertised");
+							trace!("new state for {addr}: {state:?}");
+							timeouts.extend(self.device_timeouts(addr));
+						}
 						None => {
 							break Ok(());
 						}

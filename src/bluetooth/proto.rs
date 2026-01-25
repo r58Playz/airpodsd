@@ -2,6 +2,8 @@ use anyhow::{Context, Result, bail};
 use bytes::{Buf, Bytes};
 use log::trace;
 
+use crate::keystore::CloudKeys;
+
 pub const HANDSHAKE_PACKET: &'static [u8] = &[
 	0x00, 0x00, 0x04, 0x00, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 ];
@@ -153,10 +155,7 @@ pub enum L2CapPacket {
 		model: String,
 		serial: String,
 	},
-	CloudKeys {
-		irk: Bytes,
-		enc_key: Bytes,
-	},
+	CloudKeys(CloudKeys),
 }
 
 impl L2CapPacket {
@@ -301,7 +300,7 @@ impl L2CapPacket {
 
 				Ok(irk
 					.zip(enc_key)
-					.map(|(irk, enc_key)| Self::CloudKeys { irk, enc_key }))
+					.map(|(irk, enc_key)| Self::CloudKeys(CloudKeys { irk, enc_key })))
 			}
 			x => {
 				trace!("ignoring unknown packet of type {:x?}: {:x?}", x, data);
@@ -311,4 +310,132 @@ impl L2CapPacket {
 	}
 }
 
-pub struct ProximityPairingPacket {}
+#[derive(Debug, Clone)]
+pub struct ProximityPairingPacket {
+	pub pairing_mode: bool,
+	pub device_model: u16,
+	pub status: u8,
+	pub pods_battery_byte: u8,
+	pub flags_and_case_battery: u8,
+	pub lid_indicator: u8,
+	pub decrypted_payload: Bytes,
+}
+
+impl ProximityPairingPacket {
+	pub fn decode(mut data: Bytes, decrypted_payload: Bytes) -> Result<Self> {
+		if data.remaining() < 10 {
+			bail!("proximity pairing packet is too small");
+		}
+
+		if decrypted_payload.remaining() < 16 {
+			bail!("decrypted payload must be at least 16 bytes");
+		}
+
+		// Byte 0: Prefix (0x07)
+		let prefix = data.get_u8();
+		if prefix != 0x07 {
+			bail!("invalid proximity pairing prefix: {:x?}", prefix);
+		}
+
+		// Byte 1: Length
+		let _length = data.get_u8();
+
+		// Byte 2: Pairing Mode (0x01 = Paired, 0x00 = Pairing mode)
+		let pairing_mode = data.get_u8() != 0x00;
+
+		// Bytes 3-4: Device Model (big-endian)
+		let device_model = data.get_u16();
+
+		// Byte 5: Status
+		let status = data.get_u8();
+
+		// Byte 6: Pods Battery Byte
+		let pods_battery_byte = data.get_u8();
+
+		// Byte 7: Flags & Case Battery
+		let flags_and_case_battery = data.get_u8();
+
+		// Byte 8: Lid Indicator
+		let lid_indicator = data.get_u8();
+
+		Ok(Self {
+			pairing_mode,
+			device_model,
+			status,
+			pods_battery_byte,
+			flags_and_case_battery,
+			lid_indicator,
+			decrypted_payload,
+		})
+	}
+
+	pub fn to_battery_state(&self) -> Vec<Battery> {
+		let mut batteries = Vec::with_capacity(3);
+
+		// Primary pod determination: bit 5 of status byte
+		let primary_left = (self.status & 0x20) != 0;
+
+		// Extract battery bytes from decrypted payload
+		// Byte indices: 1 = left/primary, 2 = right/secondary, 3 = case
+		let left_byte_index = if primary_left { 1 } else { 2 };
+		let right_byte_index = if primary_left { 2 } else { 1 };
+
+		if self.decrypted_payload.len() >= 4 {
+			let raw_left = self.decrypted_payload[left_byte_index];
+			let raw_right = self.decrypted_payload[right_byte_index];
+			let raw_case = self.decrypted_payload[3];
+
+			// Extract charging status (bit 7) and battery level (bits 0-6)
+			let (left_charging, left_level) = Self::format_battery(raw_left);
+			let (right_charging, right_level) = Self::format_battery(raw_right);
+			let (case_charging, case_level) = Self::format_battery(raw_case);
+
+			// Add left pod if available (level < 127)
+			if left_level < 127 {
+				let status = if left_charging {
+					BatteryStatus::Charging(left_level)
+				} else {
+					BatteryStatus::Discharging(left_level)
+				};
+				batteries.push(Battery {
+					component: BatteryComponent::Left,
+					status,
+				});
+			}
+
+			// Add right pod if available (level < 127)
+			if right_level < 127 {
+				let status = if right_charging {
+					BatteryStatus::Charging(right_level)
+				} else {
+					BatteryStatus::Discharging(right_level)
+				};
+				batteries.push(Battery {
+					component: BatteryComponent::Right,
+					status,
+				});
+			}
+
+			// Add case if available (level < 127)
+			if case_level < 127 {
+				let status = if case_charging {
+					BatteryStatus::Charging(case_level)
+				} else {
+					BatteryStatus::Discharging(case_level)
+				};
+				batteries.push(Battery {
+					component: BatteryComponent::Case,
+					status,
+				});
+			}
+		}
+
+		batteries
+	}
+
+	fn format_battery(byte: u8) -> (bool, u8) {
+		let charging = (byte & 0x80) != 0;
+		let level = byte & 0x7F;
+		(charging, level)
+	}
+}
