@@ -1,7 +1,4 @@
-use std::{
-	collections::{HashMap, HashSet},
-	sync::Arc,
-};
+use std::{collections::HashMap, pin::pin, sync::Arc};
 
 use anyhow::{Context, Result};
 use bluer::{Adapter, AdapterEvent, Address, Device, DeviceEvent, DeviceProperty, Uuid};
@@ -132,8 +129,8 @@ impl L2CapClient {
 
 				Ok(Some(if connected {
 					vec![
-						L2CapEvent::DeviceConnected(device),
 						L2CapEvent::DeviceAdded(x),
+						L2CapEvent::DeviceConnected(device),
 					]
 				} else {
 					vec![L2CapEvent::DeviceAdded(x)]
@@ -181,22 +178,26 @@ impl L2CapClient {
 
 						trace!("monitoring device {addr}");
 
-						let dev_stream = device
-							.events()
-							.await
-							.context("failed to get device event stream")?
-							.map(move |x| match x {
-								DeviceEvent::PropertyChanged(DeviceProperty::Connected(
-									connected,
-								)) => {
-									if connected {
-										L2CapEvent::DeviceConnected(device.clone())
-									} else {
-										L2CapEvent::DeviceDisconnected(device.clone())
-									}
+						let dev2 = device.clone();
+						let dev_stream = stream::unfold((), move |()| {
+							let dev2 = dev2.clone();
+							Box::pin(async move {
+								let ret = dev2.events().await.ok();
+								trace!("rebuilding stream for {addr}: succeeded {}", ret.is_some());
+								ret.map(|x| (x, ()))
+							})
+						})
+						.flatten()
+						.map(move |x| match x {
+							DeviceEvent::PropertyChanged(DeviceProperty::Connected(connected)) => {
+								if connected {
+									L2CapEvent::DeviceConnected(device.clone())
+								} else {
+									L2CapEvent::DeviceDisconnected(device.clone())
 								}
-								_ => L2CapEvent::Ignore,
-							});
+							}
+							_ => L2CapEvent::Ignore,
+						});
 
 						stream.get_mut().1.push(dev_stream);
 
