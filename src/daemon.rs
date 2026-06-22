@@ -1,5 +1,6 @@
 use std::{
 	collections::HashMap,
+	os::{linux::net::SocketAddrExt, unix::net::SocketAddr},
 	path::PathBuf,
 	pin::Pin,
 	sync::Arc,
@@ -10,7 +11,11 @@ use anyhow::{Context, Result};
 use bluer::{Adapter, Address, Session};
 use futures::{FutureExt, StreamExt, stream::FuturesUnordered};
 use log::{debug, info, trace};
-use tokio::sync::mpsc;
+use tokio::{
+	io::{AsyncReadExt, AsyncWriteExt},
+	net::UnixListener,
+	sync::mpsc,
+};
 
 use crate::{
 	battery::BluezBatteryProvider,
@@ -158,6 +163,14 @@ impl Daemon {
 
 		let mut devices = HashMap::new();
 
+		let unix = std::os::unix::net::UnixListener::bind_addr(
+			&SocketAddr::from_abstract_name("dev.r58playz.airpodsd").unwrap(),
+		)
+		.context("failed to bind to daemon unix socket")?;
+		unix.set_nonblocking(true)
+			.context("failed to set nonblocking")?;
+		let unix = UnixListener::from_std(unix).context("failed to convert to tokio")?;
+
 		info!("running");
 
 		loop {
@@ -180,6 +193,41 @@ impl Daemon {
 							}
 						}
 					}
+				}
+				stream = unix.accept() => {
+					let (stream, addr) = stream.context("failed to accept unix socket stream")?;
+
+					debug!("new unix socket client {addr:?}");
+
+					let devices = devices.clone();
+					tokio::spawn({
+						async move {
+							let (mut rx, mut tx) = stream.into_split();
+							let mut str = String::new();
+							rx.read_to_string(&mut str).await.context("failed to read client request")?;
+
+							match str.as_str() {
+								"detailed" => {
+									tx.write_all(b"Current device info:\n").await.context("failed to write")?;
+									for (addr, state) in devices {
+										tx.write_all(&format!("Device {addr:?}:\n").into_bytes()).await.context("failed to write")?;
+										tx.write_all(&format!("\tConnected: {}\n", state.connected).into_bytes()).await.context("failed to write")?;
+										tx.write_all(&format!("\tLast BLE advertise: {:?}\n", state.last_ble_advertise).into_bytes()).await.context("failed to write")?;
+										tx.write_all(&format!("\tCase: {:?}\n", state.battery.case).into_bytes()).await.context("failed to write")?;
+										tx.write_all(&format!("\tLeft: {:?}\n", state.battery.left).into_bytes()).await.context("failed to write")?;
+										tx.write_all(&format!("\tRight: {:?}\n", state.battery.right).into_bytes()).await.context("failed to write")?;
+									}
+								}
+								"status" => {
+									tx.write_all(&format!("{} devices connected :3\n", devices.iter().filter(|(_, b)| b.connected).count()).into_bytes()).await.context("failed to write")?;
+								}
+								_ => {}
+							}
+
+							tx.shutdown().await.context("failed to end stream")?;
+							anyhow::Ok(())
+						}.then(|x| async move { trace!("served client {addr:?}: {x:?}") })
+					});
 				}
 				x = rx.recv() => {
 					match x {
