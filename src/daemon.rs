@@ -208,11 +208,13 @@ impl Daemon {
 
 							match str.as_str() {
 								"detailed" => {
+									let now = Instant::now();
 									tx.write_all(b"Current device info:\n").await.context("failed to write")?;
 									for (addr, state) in devices {
+										let last_ble_advertise = state.last_ble_advertise.map(|x| now - x);
 										tx.write_all(&format!("Device {addr:?}:\n").into_bytes()).await.context("failed to write")?;
 										tx.write_all(&format!("\tConnected: {}\n", state.connected).into_bytes()).await.context("failed to write")?;
-										tx.write_all(&format!("\tLast BLE advertise: {:?}\n", state.last_ble_advertise).into_bytes()).await.context("failed to write")?;
+										tx.write_all(&format!("\tLast BLE advertise: {last_ble_advertise:?} ago\n").into_bytes()).await.context("failed to write")?;
 										tx.write_all(&format!("\tCase: {:?}\n", state.battery.case).into_bytes()).await.context("failed to write")?;
 										tx.write_all(&format!("\tLeft: {:?}\n", state.battery.left).into_bytes()).await.context("failed to write")?;
 										tx.write_all(&format!("\tRight: {:?}\n", state.battery.right).into_bytes()).await.context("failed to write")?;
