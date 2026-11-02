@@ -9,6 +9,22 @@ use crate::daemon::DeviceBattery;
 
 const AIRPODSD_SERVE_PATH: &str = "/dev/r58playz/airpodsd";
 
+#[derive(Clone, Debug, clap::ValueEnum)]
+pub enum BatteryAggregation {
+	Average,
+	Min,
+	Max,
+}
+impl BatteryAggregation {
+	fn aggregate(&self, left: u8, right: u8) -> u8 {
+		match self {
+			Self::Average => (left + right) / 2,
+			Self::Min => left.min(right),
+			Self::Max => left.max(right),
+		}
+	}
+}
+
 #[proxy]
 trait BatteryProviderManager {
 	fn register_battery_provider(&self, provider: OwnedObjectPath) -> zbus::Result<()>;
@@ -40,9 +56,13 @@ impl BluezBattery {
 pub struct BluezBatteryProvider {
 	adapter_name: String,
 	conn: Connection,
+	battery_aggregation: BatteryAggregation,
 }
 impl BluezBatteryProvider {
-	pub async fn new(adapter: &Adapter) -> Result<Self> {
+	pub async fn new(
+		adapter: &Adapter,
+		battery_aggregation: BatteryAggregation,
+	) -> Result<Self> {
 		let adapter_name = adapter.name().to_string();
 		let conn = ConnBuilder::system()
 			.context("failed to create builder")?
@@ -71,12 +91,16 @@ impl BluezBatteryProvider {
 			.await
 			.context("failed to register battery provider")?;
 
-		Ok(Self { conn, adapter_name })
+		Ok(Self {
+			conn,
+			adapter_name,
+			battery_aggregation,
+		})
 	}
 
-	fn calculate_percentage(battery: &DeviceBattery) -> Option<u8> {
+	fn calculate_percentage(&self, battery: &DeviceBattery) -> Option<u8> {
 		match (battery.left.as_percent(), battery.right.as_percent()) {
-			(Some(l), Some(r)) => Some((l + r) / 2),
+			(Some(l), Some(r)) => Some(self.battery_aggregation.aggregate(l, r)),
 			(Some(l), None) => Some(l),
 			(None, Some(r)) => Some(r),
 			(None, None) => None,
@@ -94,7 +118,7 @@ impl BluezBatteryProvider {
 		let bluez_name =
 			OwnedObjectPath::try_from(format!("/org/bluez/{}/dev_{dev}", self.adapter_name))
 				.context("failed to parse bluez battery interface path")?;
-		let percent = Self::calculate_percentage(battery);
+		let percent = self.calculate_percentage(battery);
 
 		let iface = self
 			.conn

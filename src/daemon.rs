@@ -18,7 +18,7 @@ use tokio::{
 };
 
 use crate::{
-	battery::BluezBatteryProvider,
+	battery::{BatteryAggregation, BluezBatteryProvider},
 	bluetooth::{
 		ble::BleClient,
 		l2cap::L2CapClient,
@@ -87,6 +87,7 @@ impl Daemon {
 		keystore_path: PathBuf,
 		device_battery_timeout: Duration,
 		device_drop_timeout: Duration,
+		battery_aggregation: BatteryAggregation,
 	) -> Result<Self> {
 		let session = Session::new()
 			.await
@@ -97,7 +98,7 @@ impl Daemon {
 			.await
 			.context("no bluetooth adapter found")?;
 
-		let battery_manager = BluezBatteryProvider::new(&adapter)
+		let battery_manager = BluezBatteryProvider::new(&adapter, battery_aggregation)
 			.await
 			.context("failed to register bluez battery provider")?;
 
