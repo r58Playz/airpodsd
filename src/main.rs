@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use log::LevelFilter;
 use tokio::{io::{AsyncWriteExt, stdout}, net::UnixStream};
 
-use crate::daemon::Daemon;
+use crate::{battery::BatteryAggregation, daemon::Daemon};
 
 mod battery;
 mod bluetooth;
@@ -25,6 +25,10 @@ enum Commands {
 	Daemon {
 		/// Path to keystore location. Used to store BLE advertisement keys.
 		keystore: PathBuf,
+
+		/// How to combine the left and right earbud battery levels.
+		#[clap(long, value_enum, default_value = "average")]
+		battery_aggregation: BatteryAggregation,
 
 		/// Timeout (in seconds) until inaccessible devices get dropped from airpodsd's battery reporting.
 		#[clap(short, long, default_value_t = 60)]
@@ -54,6 +58,7 @@ async fn main() -> Result<()> {
 	match args.command {
 		Commands::Daemon {
 			keystore,
+			battery_aggregation,
 			battery_drop_timeout,
 			device_drop_timeout,
 		} => {
@@ -61,6 +66,7 @@ async fn main() -> Result<()> {
 				keystore,
 				Duration::from_secs(battery_drop_timeout),
 				Duration::from_secs(device_drop_timeout),
+				battery_aggregation,
 			)
 			.await
 			.context("failed to create daemon instance")?;
